@@ -1,0 +1,412 @@
+Gereksinimler:
+	subprocess
+	getopt
+	sys
+	time
+	threading
+	rrdtool
+	
+	
+Klasörler:
+	rrdtool	= rddtool veritabanı, grafik ve kaynak verisi toplamak için var olan kodları içerir.
+	bash 	= snmptrapd.conf dosyası tarafından yönlendirilen bash komutlarını içeren kodlardır. snmp klasöründeki python "*Trap.py" dosyalarını çalıştırır. 
+	snmp	= Trap ile gelen verileri ayrıştırıp terminale basmak için kullanılır.
+	***************************************************************************************************************************************************************************************************************	
+	
+Kaynak Veri Toplama Scriptleri:
+
+
+	cpu.py:
+		"/proc" klasörü üzerinden, "stat" dosyası verilerini okuyarak belirlenen opsiyonlara göre yüzdelik olarak geri döner. "-c", "-a" ve "-i" olmak üzere 3 opsiyona sahiptir;
+			"-c" opsiyonu, ilgili argümandaki "cpu core" kullanım yüzdesi olarak geri döner,
+			"-a" opsiyonu, "cpu" tamamı ve tekil tüm "cpu core"ların kullanım yüzdeleri olarak geri döner	(Format: [%cpu_all, %cpu0, %cpu1, %cpu2, %cpu3, %cpu4, %cpu5, %cpu6, %cpu7]),
+			"-i" opsiyonu, ilgili argümanı "float" cinsinden interval olarak atar.				(varsayılan = 1.0 saniye)
+		
+		Veri yüzdesini belirlerken, "/proc/stat" içerisindeki zaman verisini örnekledikten sonra belirlenen intervalde bekleyip ikinci örneği alır ve aradaki zaman farklarını belirleyerek "idle" ve "io-wait" için harcanan zamanı içerikteki tüm harcanan zamana bölerek hesaplar. Testlerde "import (python code)", "subprocess", "mpstat" ve "psutil" kendi arasında harcanan süre olarak karşılaştırılmış ve benzer performanslar sergilemiştir. "import cpu" 0.250 saniye, "subprocess" 0.272 saniye, "mpstat" 0.255 saniye(diğerlerine göre daha farklı/hatalı sonuçlarla dönmüştür), ve "psutil" 0.253 saniye ile en az gecikmeli sonuçlar olarak saptanmıştır.(Testler python "timeit" fonksiyonu ile 10 milyon tekrar sonucunda elde edilmiştir)
+		
+		Kod içeriğinde temel olarak 6 fonksiyon belirlenmiş olup, biri "main" olmasının haricinde, diğerleri açıklamaları ile aşağıdadır:
+			getCpuInfo()			("/proc/stat" dosyasını okur ve ham verileri ayıklayıp "tuple" olarak geri döner)
+			core()				("/proc/stat" dosyasını okur ve satır sayısını geri döner --cpu çekirdek sayısı + 1--)
+			getTimeDiff(list0, list1)	(Her girdi listesi için iki örneğin farkını alır ve bu verileri "tuple" olarak geri döner)
+			deltaTime(interval)		(İki listenin zaman farkılarını geri döner)
+			cpuLoad()			(Idle ve IO wait zamanlarını tüm geçen zamana oranlar ve 1'den çıkarır, "float" cinsinden her çekirdek için geri döner)
+			
+			
+		Örnek:
+			"python cpu.py -c 5 -i 2"
+			Çıktı; "0.5"
+			
+			"python cpu.py -a -i 3"
+			Çıktı; "[0.71, 1.36, 0.66, 1.32, 0.67, 0.99, 0.0, 1.33, 0.0]"
+			
+			"cpu.main("-a -i 5")"
+			
+			
+			
+			
+	memory.py:
+		"free" komutunu kullanarak, RAM verilerini yorumlar ve opsiyona bağlı olarak geri döner. "-t", "-u", "-b", "-c", "-f" ve "-p" olmak üzere 6 opsiyona sahiptir;
+			"-t" opsiyonu, toplam disk'i kB cinsinden geri döner,
+			"-u" opsiyonu, kulanılan RAM'i kB cinsinden geri döner,
+			"-b" opsiyonu, "buffered" RAM'i kB cinsinden geri döner,
+			"-c" opsiyonu, "cached" RAM'i kB cinsinden geri döner,
+			"-f" opsiyonu, boşta olan RAM'i kB cinsinden geri döner,
+			"-p" opsiyonu, boşta olan RAM'i yüzde cinsinden geri döner.
+			
+		Yalnızca "free" komutu çıktısını yorumlar ve, verileri veya "free - (cached + buffered)" fonksiyonu ile kullanılan kısmı tüm RAM'e oranlayarak, opsiyon girdi sırasına göre liste olarak  sonucunu geri döner.
+		
+		Örnek:
+			"python memory.py -t"
+			Çıktı; "[16323620]"
+			
+			"python memory.py -tuf"
+			Çıktı; "[16323620, 3783764, 6465584]"
+			
+			"python memory.py -ucfbtp"
+			Çıktı; "[3783192, 5787864, 6441528, 311036, 16323620, 23.18]"
+			
+			"memory.main("-tubcfp")"
+	
+	
+	
+	
+	
+	disk.py:
+		"df" komutunu kullanarak, disk verilerini yorumlar ve opsiyona bağlı olarak geri döner. "-d", "-t", "-u", "-f", "-p" ve "-m" olmak üzere 6 opsiyona sahiptir;
+			"-d" opsiyonu, disk adını geri döner,				(varsayılan = sda)
+			"-t" opsiyonu, toplam diski 1k blok cinsinden geri döner,
+			"-u" opsiyonu, kulanılan diski 1k blok cinsinden geri döner,
+			"-f" opsiyonu, boşta olan diski 1k blok cinsinden geri döner,
+			"-p" opsiyonu, boşta olan diski yüzde cinsinden geri döner,
+			"-m" opsiyonu, "mount" adresini geri döner.
+			
+		Yalnızca "df" komutu çıktısını yorumlar ve opsiyonların belirtilme sırasına göre "tuple" olarak sonucunu geri döner.
+		
+		Örnek:
+			"python disk.py -t"
+			Çıktı; "[['/dev/sda1'], [944898452], [], [], [], []]"
+			
+			"python disk.py -d none -t"
+			Çıktı; "[['none', 'none', 'none', 'none'], [4, 5120, 8161808, 102400], [], [], [], []]"
+			
+			"python disk.py -d none -ufmt"
+			Çıktı; "[['none', 'none', 'none', 'none'], [4, 5120, 8161808, 102400], [0, 0, 354524, 80], [4, 5120, 7807284, 102320], [], ['/sys/fs/cgroup', '/run/lock', '/run/shm', '/run/user']]
+"
+			
+			"disk.main("-d none -ufmt")"
+			
+			
+		
+			
+			
+	net.py:
+		"/proc/net" klasörü üzerinden, "dev" dosyası verilerini okuyarak belirlenen "interface"e göre geri döner. "-i" olarak tek opsiyona sahiptir;
+			"-i" opsiyonu, ilgili argümanı "string" cinsinden "interface" olarak atar, girdi olarak "integer" veya "string" geçerlidir ve çoklu girdilerde ',' ile ayrılmalıdır. Argümanın "l" ya da "list" olarak verilmesi durumunda "interface" listesini döner.
+		
+		Verileri "/proc/net/dev" içerisindeki kB ve paket olarak yorumlar. "Tuple" içerisindeki her listeyi sırasıyla "[alınan_veri, alınan_paket, gönderilen_veri, gönderilen_paket]" olarak geri döner. Yalnızca, "string","integer" formatında sadece "string" olanları geri döner.
+		
+		Kod içeriğinde temel olarak 6 fonksiyon belirlenmiş olup, biri "main" olmasının haricinde, diğerleri açıklamaları ile aşağıdadır:
+			selectInterface(interface)	(Girdi olarak verilen "interface", virgül olarak ayrılmış olmak kaydıyla ayrıştırılır ve sistemdeki sırasına bağlı kalarak isimlerini geri döner)
+			getInterfaceList()		(Sistemdeki "interface" listesini geri döner)
+			parseData(data)			(Okunan veriyi "RxByte, RxPacket, TxByte, TxPacket" olarak yorumlar)
+			getInterfaceData(interface)	("/proc/net/dev" dosyasını okur)
+			
+			
+		Örnek:
+			"python net.py -i eth2"
+			Çıktı; "[[3724130297056.0, 309892689.0, 310073815000.0, 51933323.0]]"
+			
+			"python net.py -i list"
+			Çıktı; "['wlan2', 'lo', 'eth2', 'vmnet1', 'vmnet2', 'vmnet8']"
+			
+			"python net.py -i eth2,lo"
+			Çıktı; "[[7655229009400.0, 32584949.0, 7655229009400.0, 32584949.0], [3724130297536.0, 309892690.0, 310073821816.0, 51933327.0]]" (sırasıyla; [[lo],[eth2]])
+			
+			"python net.py -i 2,1"
+			Çıktı; "[[7655229019792.0, 32584957.0, 7655229019792.0, 32584957.0], [3724130454184.0, 309892759.0, 310074052424.0, 51933404.0]]"
+	
+			"net.main("-i eth2,lo")"
+			
+			
+			
+	***************************************************************************************************************************************************************************************************************			
+			
+			
+			
+			
+RRDTool Veri İzleme Scriptleri:
+	
+	
+	rrdCPU.py:
+		"cpu.py" kodu üzerinde aldığı veriyi isteğe göre belirlenen intervalde veritabanına yazar ve dakikalık, saatlik, haftalık, aylık dilimlerde grafik çıktısı üretir. "graphs" klasörü altında belirtilen opsiyonlara göre, "CPU" adında tüm CPU için ve "CPU" + çekirdek numarası olmak üzere tüm çekirdekler için "png" grafikleri kaydeder. Aşağıdaki 10 opsiyona sahiptir;
+			"-c" opsiyonu ilgili argümanı, "cpu.rrd" adım sayısını atar,
+			"-l" opsiyonu ilgili argümanı, "cpu.rrd" zaman üst limitini atar,
+			"-s" opsiyonu ilgili argümanı, başlangıç zamanını belirler,
+			"-e" opsiyonu ilgili argümanı, bitiş zamanını belirler,
+			"-i" opsiyonu ilgili argümanı, "cpu.py" kodundaki intervali belirler,
+			"-m" opsiyonu ilgili argümanı, monitörlenecek (güncelleme ve grafik üretimi) çekirdeği ('a' ya da "all" için tüm çekirdekleri) belirler,
+			"-g" opsiyonu ilgili argümanı, grafik ismini belirler,
+			"-t" opsiyonu ilgili argümanı, grafik yaratım süresini (dakikalık, saatlik, haftalık, ...) belirler,
+			"-u" opsiyonu ilgili argümanı, güncellenecek çekirdeği ('a' ya da "all" için tüm çekirdekleri) belirler,
+			"-p" opsiyonu, grafikleri üretir.
+			
+		Kod içeriğinde temel olarak 6 fonksiyon belirlenmiş olup, biri "main" olmasının haricinde, diğerleri açıklamaları ile aşağıdadır:
+			create(step)					("cpu.rrd" isimli veritabanını belirlenen süre ve adım aralığında yaratır, "/graphs" ve altındaki klasörleri yaratır)
+			fetch(sTime,eTime)				(Belirtilen aralıktaki verileri ekrana basar)
+			update(dataSource,time,value)			(Anlık zamanı ve veriyi, veritabanına yükler)
+			graph(core,typ,colour,sTime,eTime,output)	(Belirlenen zaman aralıklarında ./graphs/ klasörüne grafik çıktısı yazar)
+			cpuGet()					(CPU kullanım yüzdelik verisini okur -commented-)
+			
+		Örnek:
+			"python rrdCPU.py -c 1 -u a"	(adım aralığı = 1, tüm "cpu.rrd" veritabanında güncellenir)
+			
+			"python rrdCPU.py -t md -p"	('m' = dakikalık ve 'd' = günlük zaman dilimlerinde grafikleri oluşturur)
+			
+		
+		
+		
+			
+			
+	rrdMem.py:
+		"memory.py" kodu üzerinde aldığı veriyi veritabanına yazar ve dakikalık, saatlik, haftalık, aylık dilimlerde grafik çıktısı üretir. "graphs" klasörü altında, kB cinsinden olmak üzere kullanım verisini ve yüzdelik kullanım olmak üzere iki adet "png" grafik kaydeder. Aşağıdaki 9 opsiyona sahiptir;
+			"-c" opsiyonu ilgili argümanı, "mem.rrd" adım sayısını atar,
+			"-l" opsiyonu ilgili argümanı, "mem.rrd" zaman üst limitini atar,
+			"-s" opsiyonu ilgili argümanı, başlangıç zamanını belirler,
+			"-e" opsiyonu ilgili argümanı, bitiş zamanını belirler,
+			"-g" opsiyonu ilgili argümanı, grafik ismini belirler,
+			"-d" opsiyonu ilgili argümanı, grafik bastığı döngüdeki gecikmeyi belirler (varsayılan = 1 saniye),
+			"-t" opsiyonu ilgili argümanı, grafik yaratım süresini (dakikalık, saatlik, haftalık, ...) belirler,
+			"-u" opsiyonu, güncelleme için var olan döngü bayrağını aktif hale getirir,
+			"-p" opsiyonu, grafik üretimi için var olan döngü bayrağını aktif hale getirir.
+			
+		Kod içeriğinde temel olarak 5 fonksiyon belirlenmiş olup, biri "main" olmasının haricinde, diğerleri açıklamaları ile aşağıdadır:
+			create(step)								("mem.rrd" isimli veritabanını belirlenen süre ve adım aralığında yaratır, "/graphs" ve altındaki klasörleri yaratır)
+			fetch(sTime,eTime)							(Belirtilen aralıktaki verileri ekrana basar, varsayılan = "now"/"now-60")
+			update(dataSource,time,value)						(Anlık zamanı ve veriyi, veritabanına yükler)
+			graph(typ, uColour, bColour, cColour, pColour, sTime, eTime, output)	(Belirlenen zaman aralıklarında ./graphs/ klasörüne grafik çıktısı yazar)
+			
+		Örnek:
+			"python rrdMem.py -c 1 -u"	(adım aralığı = 1, "mem.rrd" veritabanında güncellenir)
+			
+			"python rrdMem.py -t md -p"	('m' = dakikalık ve 'd' = günlük zaman dilimlerinde grafikleri oluşturur)
+			
+			
+			
+	rrdDisk.py:
+		"disk.py" kodu üzerinde aldığı veriyi veritabanına yazar ve dakikalık, saatlik, haftalık, aylık dilimlerde grafik çıktısı üretir. "graphs" klasörü altında, 1k blok cinsinden olmak üzere kullanım verisini ve yüzdelik kullanım olmak üzere iki adet "png" grafik kaydeder. Aşağıdaki 10 opsiyona sahiptir;
+			"-c" opsiyonu ilgili argümanı, "disk.rrd" adım sayısını atar,
+			"-l" opsiyonu ilgili argümanı, "disk.rrd" zaman üst limitini atar,
+			"-s" opsiyonu ilgili argümanı, başlangıç zamanını belirler,
+			"-e" opsiyonu ilgili argümanı, bitiş zamanını belirler,
+			"-g" opsiyonu ilgili argümanı, grafik ismini belirler,
+			"-d" opsiyonu ilgili argümanı, "memory.py" içerisindeki güncellenecek ve grafii basılacak disk ismini belirler,
+			"-t" opsiyonu ilgili argümanı, grafik bastığı döngüdeki gecikmeyi belirler (varsayılan = 1 saniye),
+			"-u" opsiyonu, güncelleme için var olan döngü bayrağını aktif hale getirir,
+			"-p" opsiyonu, grafik üretimi için var olan döngü bayrağını aktif hale getirir,
+			"-w" opsiyonu ilgili argümanı, grafik üretimi için var olan döngü bayrağını aktif hale getirir.
+			
+		Kod içeriğinde temel olarak 5 fonksiyon belirlenmiş olup, biri "main" olmasının haricinde, diğerleri açıklamaları ile aşağıdadır:
+			create(step)							("disk.rrd" isimli veritabanını belirlenen süre ve adım aralığında yaratır, "/graphs" ve altındaki klasörleri yaratır)
+			fetch(sTime,eTime)						(Belirtilen aralıktaki verileri ekrana basar, varsayılan = "now"/"now-60")
+			update(dataSource,time,value)					(Anlık zamanı ve veriyi, veritabanına yükler)
+			graph(typ, uColour, aColour, pColour, sTime, eTime, output)	(Belirlenen zaman aralıklarında ./graphs/ klasörüne grafik çıktısı yazar)
+			
+		Örnek:
+			"python rrdDisk.py -c 1 -u"	(adım aralığı = 1, "disk.rrd" veritabanında güncellenir)
+			
+			"python rrdDisk.py -t md -p"	('m' = dakikalık ve 'd' = günlük zaman dilimlerinde grafikleri oluşturur)
+			
+			
+			
+			
+			
+			
+	rrdNet.py:
+		"net.py" kodu üzerinde aldığı veriyi veritabanına yazar ve dakikalık, saatlik, haftalık, aylık dilimlerde grafik çıktısı üretir. "graphs" klasörü altında, belirtilen "interface"lere göre byte ve paket cinsinden iki adet "png" grafik kaydeder. Aşağıdaki 14 opsiyona sahiptir;
+			"-c" opsiyonu ilgili argümanı, "net.rrd" adım sayısını atar,
+			"-l" opsiyonu ilgili argümanı, "net.rrd" zaman üst limitini atar,
+			"-w" opsiyonu ilgili argümanı, grafik çıktılarında genişliği belirler,
+			"-h" opsiyonu ilgili argümanı, grafik çıktılarında yüksekliği belirler,
+			"-f" opsiyonu ilgili argümanı, güncelleme ve grafik çıktılarındaki "interface"leri belirler (farklı "interface"ler virgül ile ayrılarak yazılmalıdır),
+			"-i" opsiyonu ilgili argümanı, "timer thread"in intervalini belirler,
+			"-s" opsiyonu ilgili argümanı, başlangıç zamanını belirler,
+			"-e" opsiyonu ilgili argümanı, bitiş zamanını belirler,
+			"-g" opsiyonu ilgili argümanı, grafik ismini belirler,
+			"-d" opsiyonu ilgili argümanı, "memory.py" içerisindeki güncellenecek ve grafii basılacak disk ismini belirler,
+			"-t" opsiyonu ilgili argümanı, grafik bastığı döngüdeki gecikmeyi belirler (varsayılan = 1 saniye),
+			"-u" opsiyonu, güncelleme için var olan döngü bayrağını aktif hale getirir,
+			"-p" opsiyonu, grafik üretimi için var olan döngü bayrağını aktif hale getirir,
+			"-a" opsiyonu ilgili argümanı, grafik çıktılarındaki alınan (received) ve verilen (transmitted) verilerini farklı iki dosyaya ayırır.
+			
+		Kod içeriğinde temel olarak 7 fonksiyon belirlenmiş olup, biri "main" olmasının haricinde, diğerleri açıklamaları ile aşağıdadır:
+			create(step)						("net.rrd" isimli veritabanını belirlenen süre ve adım aralığında yaratır, "/graphs" ve altındaki klasörleri yaratır)
+			fetch(sTime,eTime)					(Belirtilen aralıktaki verileri ekrana basar, varsayılan = "now"/"now-60")
+			pUpdate()						(Anlık zamanı ve veriyi, veritabanına yükler)
+			updateString()						(Güncelleme sırasında değişmeyecek ön girdiyi hazırlar)
+			update(interval)					("Timer thread"i başlatır ve 1000 saniyelik boş döngüye girer)
+			graph(pInterface, typ, colour, sTime, eTime, output)	(Belirlenen zaman aralıklarında ./graphs/ klasörüne grafik çıktısı yazar)
+			
+		Timer Thread Class:
+			"__init__", "handleInternalfunction", "start" ve "cancel" olamk üzere 4 fonksiyondan oluşur. "__init__" başlangıç "thread"ini belirtilen "handler" fonksiyona göre çağırır ve tekrar yeni, "handleInternalfunction"a bağlı bir thread başlatır. "handleInternalfunction", "recursive" bir prosedür olarak, "cancel" fonksiyonu çağıralana kadar kendini çağırmaya devam eder.
+			
+		Örnek:
+			"python rrdNet.py -c 1 -u -f lo,eth2"	(adım aralığı = 1, "net.rrd" veritabanında, "eth2" ve "lo" güncellenir)
+			
+			"python rrdNet.py -t md -p -f eth2,lo"	('m' = dakikalık ve 'd' = günlük zaman dilimlerinde, "eth2" ve "lo" grafikleri oluşturur)
+			
+			
+			
+			***************************************************************************************************************************************************************************************************************			
+			
+			
+SNMP Trap Scriptleri:
+	
+	cpu.py:
+		Bkz. "Kaynak Veri Toplama Scriptleri/cpu.py"
+		
+		
+	memory.py:
+		Bkz. "Kaynak Veri Toplama Scriptleri/memory.py"
+		
+		
+	disk.py:
+		Bkz. "Kaynak Veri Toplama Scriptleri/disk.py"
+		
+		
+	net.py:
+		"Kaynak Veri Toplama Scriptleri/net.py"den farklı olan tek yanı "calculateDifferance(interface)" fonksiyonu ve "main" içerisindeki geri dönüşün bu fonksiyona bağlı olmasıdır. Temel olarak "cpu.py" içindeki gibi iki farklı örneği bir saniye interval farkı ile aldıktan sonra ilgili örneklerin farklarını alır.
+	
+	
+	
+	
+	netConnection.py:
+		netConnection.py:
+		Kullanıcı seçimine bağlı olarak "netstat" ve "ss" komutlarını kullanarak seçilen türdeki bağlantıların sayısını geri döner. Aşağıdaki 3 opsiyona sahiptir;
+			"-o" opsiyonu ilgili argümanı, "netstat" veya "ss" sorgusundaki opsiyonları doğrudan(!) "string" halinde komuta ekler (varsayılan = "tan4"),
+			"-i" opsiyonu ilgili argümanı, "netstat" veya "ss" komutlarından hangisinin kullanılacağını belirler (varsayılan = "netstat"),
+			"-s" opsiyonu ilgili argümanı, komutun belirtilen durumdaki (state) bağlantıları dönmesini sağlar (varsayılan = "", tüm durumları sayar).
+			
+		Kod içeriğinde temel olarak 3 fonksiyon belirlenmiş olup, biri "main" olmasının haricinde, diğerleri açıklamaları ile aşağıdadır:
+			netstatOpt(options, state)		(Belirlenen opsiyon ve durumu değiştirmeden "netstat" komut satırına ekler ve sonucu geri döner)
+			ssOpt(options, state)			(Belirlenen opsiyon ve durumu değiştirmeden "ss" komut satırına ekler ve sonucu geri döner)
+			
+		Örnek:
+			"python netConnection.py"				(kaynak = "netstat", durum = hepsi, seçenek = "tan4")
+			Çıktı; "14"
+			"python netConnection.py -i ss -s ESTABLISHED -o tan6"	(kaynak = "ss", durum = "ESTABLISHED", seçenek = "tan6")
+			Çıktı; "0"
+			
+			
+	
+	
+	cpuTrap.py:
+		"cpu.py" kodu üzerinde aldığı veriyi kullanıcı tarafından belirlenen limit ile kıyaslar, limitin üstüne çıkması ya da eşit olması durumunda terminal üzerinden uyarı verir ve "trap" mesajı gönderir. Belirlenen interval kadar bekler, beklemenin sonunda çağrılan cpuLimitInt() fonksiyonu anlık olarak yeni veriyi tekrar kontrol eder, eşiğin altına düşmesi durumunda ilk konuma geri döner. Aşağıdaki 3 opsiyona sahiptir;
+			"-l" opsiyonu ilgili argümanı, "trap" limitini belirler,
+			"-i" opsiyonu ilgili argümanı, bekleme intervalini belirler,
+			"-c"  opsiyonu ilgili argümanı, "a" veya "all" olarak belirtilmişse tüm çekirdeklerin ortalama değerini, çekirdek numarasıyla (0-3, 0-7, vs.) yüzdelik kullanımı geri döner.
+			
+		Kod içeriğinde temel olarak 4 fonksiyon belirlenmiş olup, biri "main" olmasının haricinde, diğerleri açıklamaları ile aşağıdadır:
+			checkCPU()						("cpu.py" dosyasını kullanarak CPU kullanımını ve zamanı belirler)
+			sendTrap(trapOID, data)					(Belirlenen global değişkenlere ve anlık veriye göre "trap" gönderir, içerik olarak zaman ve CPU verisi gönderilir)
+			cpuLimitInt()						(Anlık CPU kullanımını, limit ile karşılaştırır, limitten düşük olması durumunda bCPUOver bayrağını "False" olarak atar)
+		Class:
+			intervalTimer()						(bkz. "rrdNet.py"/"Timer Thread Class")
+	
+	
+	
+	
+	memTrap.py:
+		"memory.py" kodu üzerinde aldığı veriyi kullanıcı tarafından belirlenen limit ile kıyaslar, limitin üstüne çıkması ya da eşit olması durumunda terminal üzerinden uyarı verir ve "trap" mesajı gönderir. Belirlenen interval kadar bekler, beklemenin sonunda çağrılan memLimitInt() fonksiyonu anlık olarak yeni veriyi tekrar kontrol eder, eşiğin altına düşmesi durumunda ilk konuma geri döner. Aşağıdaki 2 opsiyona sahiptir;
+			"-l" opsiyonu ilgili argümanı, "trap" limitini belirler,
+			"-i" opsiyonu ilgili argümanı, bekleme intervalini belirler.
+			
+		Kod içeriğinde temel olarak 4 fonksiyon belirlenmiş olup, biri "main" olmasının haricinde, diğerleri açıklamaları ile aşağıdadır:
+			checkMEM()						("memory.py" dosyasını kullanarak RAM kullanımını ve zamanı belirler)
+			sendTrap(trapOID, data)					(Belirlenen global değişkenlere ve anlık veriye göre "trap" gönderir, içerik olarak zaman ve RAM verisi gönderilir)
+			memLimitInt()						(Anlık RAM kullanımını, limit ile karşılaştırır, limitten düşük olması durumunda bMEMOver bayrağını "False" olarak atar)
+		Class:
+			intervalTimer()						(bkz. "rrdNet.py"/"Timer Thread Class")
+	
+	
+	
+	
+	
+	diskTrap.py:
+		"disk.py" kodu üzerinde aldığı veriyi kullanıcı tarafından belirlenen limit ile kıyaslar, limitin üstüne çıkması ya da eşit olması durumunda terminal üzerinden uyarı verir ve "trap" mesajı gönderir. Belirlenen interval kadar bekler, beklemenin sonunda çağrılan diskLimitInt() fonksiyonu anlık olarak yeni veriyi tekrar kontrol eder, eşiğin altına düşmesi durumunda ilk konuma geri döner. Aşağıdaki 2 opsiyona sahiptir;
+			"-l" opsiyonu ilgili argümanı, "trap" limitini belirler,
+			"-i" opsiyonu ilgili argümanı, bekleme intervalini belirler.
+			
+		Kod içeriğinde temel olarak 4 fonksiyon belirlenmiş olup, biri "main" olmasının haricinde, diğerleri açıklamaları ile aşağıdadır:
+			checkDISK()						("disk.py" dosyasını kullanarak Disk kullanımını ve zamanı belirler)
+			sendTrap(trapOID, data)					(Belirlenen global değişkenlere ve anlık veriye göre "trap" gönderir, içerik olarak zaman ve Disk verisi gönderilir)
+			diskLimitInt()						(Anlık Disk kullanımını, limit ile karşılaştırır, limitten düşük olması durumunda bDISKOver bayrağını "False" olarak atar)
+		Class:
+			intervalTimer()						(bkz. "rrdNet.py"/"Timer Thread Class")
+	
+	
+	
+	
+	netTrap.py:
+		"net.py" kodu üzerinde aldığı tek "interface"in verisini, kullanıcı tarafından belirlenen limit ile kıyaslar, limitin üstüne çıkması ya da eşit olması durumunda terminal üzerinden uyarı verir ve "trap" mesajı gönderir. Belirlenen interval kadar bekler, beklemenin sonunda çağrılan netLimitInt() fonksiyonu anlık olarak yeni veriyi tekrar kontrol eder, eşiğin altına düşmesi durumunda ilk konuma geri döner. Aşağıdaki 2 opsiyona sahiptir;
+			"-l" opsiyonu ilgili argümanı, "trap" limitini belirler,
+			"-i" opsiyonu ilgili argümanı, bekleme intervalini belirler.
+			
+		Kod içeriğinde temel olarak 4 fonksiyon belirlenmiş olup, biri "main" olmasının haricinde, diğerleri açıklamaları ile aşağıdadır:
+			checkNET()						("net.py" dosyasını kullanarak Network kullanımını ve zamanı belirler)
+			sendTrap(trapOID, data)					(Belirlenen global değişkenlere ve anlık veriye göre "trap" gönderir, içerik olarak zaman ve Network verisi gönderilir)
+			netLimitInt()						(Anlık Network kullanımını, limit ile karşılaştırır, limitten düşük olması durumunda bNETOver bayrağını "False" olarak atar)
+		Class:
+			intervalTimer()						(bkz. "rrdNet.py"/"Timer Thread Class")
+	
+	
+	
+	
+	netConTrap.py:
+		"netConnection.py" kodu üzerinde aldığı veriyi kullanıcı tarafından belirlenen limit ile kıyaslar, limitin üstüne çıkması ya da eşit olması durumunda terminal üzerinden uyarı verir ve "trap" mesajı gönderir. Belirlenen interval kadar bekler, beklemenin sonunda çağrılan conLimitInt() fonksiyonu anlık olarak yeni veriyi tekrar kontrol eder, eşiğin altına düşmesi durumunda ilk konuma geri döner. Aşağıdaki 2 opsiyona sahiptir;
+			"-l" opsiyonu ilgili argümanı, "trap" limitini belirler,
+			"-i" opsiyonu ilgili argümanı, bekleme intervalini belirler.
+			
+		Kod içeriğinde temel olarak 4 fonksiyon belirlenmiş olup, biri "main" olmasının haricinde, diğerleri açıklamaları ile aşağıdadır:
+			checkConnection()					("netConnection.py" dosyasını kullanarak Network bağlantısını ve zamanı belirler)
+			sendTrap(trapOID, data)					(Belirlenen global değişkenlere ve anlık veriye göre "trap" gönderir, içerik olarak zaman ve Network bağlantısını gönderilir)
+			conLimitInt()						(Anlık Network bağlantısını, limit ile karşılaştırır, limitten düşük olması durumunda bCONOver bayrağını "False" olarak atar)
+		Class:
+			intervalTimer()						(bkz. "rrdNet.py"/"Timer Thread Class")
+	
+	
+	
+
+
+
+	***************************************************************************************************************************************************************************************************************
+	
+	
+SNMP Trapd Scriptleri ve Configuration Dosyası:
+
+	/etc/snmp/snmptrapd.conf:
+	
+		Daha önceden belirlenen "Trap OID"lere göre her "trap" farklı bir "handle" ve "bash script" ile farklı "python script"ini çağırmaktadır. v1 ve v2c üzerinde denendi fakat v3 için denenmemiştir.
+		
+		İçerik:
+			TRAPDRUN=yes
+			disableAuthorization yes
+			#traphandle default /usr/sbin/snmptthandler
+			traphandle 1.3.6.1.4.1.2021.11.9.0	{Trap_script_kalsörü}/bash/snmpCPU.sh
+			traphandle 1.3.6.1.4.1.2021.4.5.0	{Trap_script_kalsörü}/bash/snmpMEM.sh
+			traphandle 1.3.6.1.4.1.2021.9.1.3.1	{Trap_script_kalsörü}/bash/snmpDISK.sh
+			traphandle 1.3.6.1.2.1.31.1.1.1.1	{Trap_script_kalsörü}/bash/snmpNET.sh
+			traphandle 1.3.6.1.2.1.31.1.1.1.2	{Trap_script_kalsörü}/bash/snmpCON.sh
+			
+	
+	
+	
+	Bash Scriptler:
+	
+		Beş farklı "bash script" de temelde aynı işi yapmasına rağmen tek fark çağırdıkları "python script"lerdir. Aldıkları "trap"lerin değişkenlerini ayrıştırarak "python script"lere argüman olarak gönderir.
+		
+		
+		
+	Trap Deamon Scriptleri:
+		
+		Beş farklı "snmptrapd script"in hepsi aynı işlevleri yerine getirmekle birlikte tek farkı gelen "snmp trap" komutunu '=' ve ','e göre ayırıp, daha önceden belirlenmiş olan "Trap OID"lere göre veri okuma zamanı ve ilgili veriyi tanımlar. CPU, Memory, Disk, Network ve Bağlantı sayısı için tekil yüzdelik dilimlere göre "trap" gönderim dosyaları oluşturulmuş olmasının yanı sıra, "trapd" olarak okurken, "string" olarak farklı verileri aralarına '-' yerleştirelerek gönderilmesi halinde ayrıştırır, örn. 0.0-1.3-0.2-0.2  ->  [0.0, 1.3, 0.2, 0.2]. Aksi halde ilk baştaki "Trap OID"ler ayrıştırılırken karışmaktadır. CPU için özel olarak sadece tek çekirdek için limit belirlenecek şekilde ayrıştırılır.
+		
